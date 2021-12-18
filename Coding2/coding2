@@ -1,0 +1,410 @@
+---
+title: "Coding2"
+author: "Mengjia Zeng and Weian Yin"
+date: "2021/9/12"
+output:
+  html_document: default
+  pdf_document: default
+---
+## Team Members
+1. Name: Weian Yin  NetID: 
+Work: 
+2. Name: Mengjia Zeng   NetID: mengjia6
+Work: Writing codes for Part I and for Linear, Ridge, Lasso Procedures for Boston2 data in Part II. Check code for the remaining codes. Primarily comment on the result.
+
+## Part I
+
+```{r}
+set.seed(6199)
+library(glmnet)
+myData = read.csv("C:/R/RStudio/R/Coding2_myData.csv")
+X = as.matrix(myData[, -14])
+y = myData$Y
+dim(X)
+```
+
+```{r}
+# This function is used to select the beta.
+one_var_lasso = function(r, x, lam){
+    xx = sum(x^2)
+    xr = sum(r * x)
+    b = (abs(xr) - lam/2)/xx
+    b = sign(xr) * ifelse(b > 0, b, 0)
+    return(b)
+}
+  
+```
+
+
+```{r}
+
+MyLasso = function(X, y, lam.seq, maxit) {
+  n = length(y)
+  p = dim(X)[2]
+  nlam = length(lam.seq)
+  
+  # Standardize X and Center Y
+  y_mean = mean(y)
+  X_mean = colMeans(X)
+  X_sd = apply(X, 2, sd)
+  X_Scaled = scale(X)
+  b = rep(0, p)
+  r = y
+  B = matrix(nrow = nlam, ncol = p + 1)
+  for (m in 1:nlam) {
+        lam = 2 * n * lam.seq[m]
+        for (step in 1:maxit) {
+            for (j in 1:p) {
+                r = r + (X_Scaled[, j] * b[j])
+                b[j] = one_var_lasso(r, X_Scaled[, j], lam)
+                r = r - X_Scaled[, j] * b[j]
+            }
+        }
+        B[m, ] = c(0, b)
+  }
+  B_change = matrix(nrow = nlam, ncol = p)
+  for (k in 1:nlam){
+    for (i in 1:p){
+      B[k,(i+1)] = B[k,(i+1)]/X_sd[i]
+      B_change[k,i] = X_mean[i]*B[k,(i+1)]
+      }
+  B[k,1] = y_mean - sum(B_change[k,])
+  }
+  return(B)
+}
+  
+```
+
+```{r}
+lam.seq = exp(seq (-1, -8, length.out = 80))
+myout = MyLasso (X, y, lam.seq , maxit = 50)
+x.index = log(lam.seq)
+beta = myout[,-1]
+matplot(x.index, beta,
+        xlim = c(min(x.index), max(x.index)),
+        lty = 1,
+        xlab = "Log Lambda",
+        ylab = "Coefficients",
+        type="l", 
+        lwd = 1)
+```
+
+```{r}
+lasso.fit = glmnet(X, y, alpha = 1, lambda = lam.seq)
+coef(lasso.fit)
+```
+
+```{r}
+max(abs(coef(lasso.fit) - t(myout))) #It's smaller than 0.005
+```
+
+```{r}
+plot(lasso.fit, xvar = "lambda")
+```
+
+## Part II
+
+```{r}
+Boston2 = read.csv("D:/Statistics/STAT542/Coding2/BostonData2.csv")
+library(pls)
+```
+
+```{r}
+Boston2 = Boston2[, -1]
+dim(Boston2)
+X = data.matrix(Boston2[,-1])  
+Y = Boston2[,1] 
+```
+
+```{r}
+iter = 50
+n = length(Y) # sample size
+ntest = round(n * 0.25)  # test set size
+ntrain = n - ntest  # training set size
+all.test.id = matrix(0, ntest, iter) 
+MSPE = rep(0, 7)
+names(MSPE) = c("Full", "R_min", "R_1se", "L_min", "L_1se", "L_Refit", "PCR")
+```
+
+- Full model
+
+```{r}
+# Using Full Model for 50 Iterations.
+
+# split into train and test
+for(t in 1:iter){
+  all.test.id[, t] = sample(1:n, ntest)
+}
+
+fullmodel = vector(mode = "list", length = 50)
+MESP_Linear = numeric(50)
+Ytest.pred = vector(mode = "list", length = 50)
+test.id = vector(mode = "list", length = 50)
+for (k in 1:iter){
+  ## Full Linear Regression Model
+  test.id[[k]] = all.test.id[,k]
+  fullmodel[[k]] = lm(Y ~ ., data = Boston2[-test.id[[k]],])
+  Ytest.pred[[k]] = predict(fullmodel[[k]], newdata = Boston2[test.id[[k]],])
+  MESP_Linear[k]= mean((Y[test.id[[k]]] - Ytest.pred[[k]])^2)
+}
+```
+
+- Ridge
+
+```{r}
+# Ridge with Lambda.min and Lambda.lse
+cv.out = vector(mode = "list", length = 50)
+best.lam = numeric(50)
+best.lam.1se = numeric(50)
+Yridge.pred.min = vector(mode = "list", length = 50)
+Yridge.pred.1se = vector(mode = "list", length = 50)
+MESP.Ridge.min = numeric(50)
+MESP.Ridge.1se = numeric(50)
+
+# Choose the Lambda sequence based on the 10th training split.
+sample.test.id = all.test.id[,10]
+sample.cv.out1 = cv.glmnet(X[-sample.test.id, ], Y[-sample.test.id], alpha = 0)
+plot(sample.cv.out1)
+
+# The default lambda sequence seems not appropriate, since it did not seem to include the minimum lambda. Then set another lambda sequence.
+myridge.lambda.seq2 = exp(seq(-5, 0, length.out = 100))
+sample.cv.out2 = cv.glmnet(X[-sample.test.id, ], Y[-sample.test.id], alpha = 0, lambda = myridge.lambda.seq2)
+plot(sample.cv.out2)
+
+# Still not appropriate. Keep decreasing lambda. 
+myridge.lambda.seq3 = exp(seq(-9, -3, length.out = 100))
+sample.cv.out3 = cv.glmnet(X[-sample.test.id, ], Y[-sample.test.id], alpha = 0, lambda = myridge.lambda.seq3)
+plot(sample.cv.out3)
+
+# Then myridge.lambda.seq3 seem to be good, use this lambda sequence for the 50 iterations.
+myridge.lambda.seq = exp(seq(-9, -3, length.out = 100))
+```
+
+
+```{r}
+for (k in 1:iter){
+  test.id[[k]] = all.test.id[,k]
+  cv.out[[k]] = cv.glmnet(X[-test.id[[k]], ], Y[-test.id[[k]]], alpha = 0, lambda = myridge.lambda.seq)
+  best.lam[k] = cv.out[[k]]$lambda.min
+  best.lam.1se[k] = cv.out[[k]]$lambda.1se
+  
+  Yridge.pred.min[[k]] = predict(cv.out[[k]], s = best.lam[k], newx = X[test.id[[k]], ])
+  MESP.Ridge.min[k]= mean((Y[test.id[[k]]] - Yridge.pred.min[[k]])^2)
+  
+  Yridge.pred.1se[[k]] = predict(cv.out[[k]], s = best.lam.1se[k], newx = X[test.id[[k]], ])
+  MESP.Ridge.1se[k]= mean((Y[test.id[[k]]] - Yridge.pred.1se[[k]])^2)
+}
+
+```
+
+```{r}
+# Lasso with Lambda.min and Lambda.lse
+cv.out.lasso = vector(mode = "list", length = 50)
+best.lam.lasso = numeric(50)
+best.lam.lasso.1se = numeric(50)
+Ylasso.pred.min = vector(mode = "list", length = 50)
+Ylasso.pred.1se = vector(mode = "list", length = 50)
+MESP.Lasso.min = numeric(50)
+MESP.Lasso.1se = numeric(50)
+mylasso.coef = vector(mode = "list", length = 50)
+var.sel = vector(mode = "list", length = 50)
+mylasso.refit = vector(mode = "list", length = 50)
+Yrefit.pred = vector(mode = "list", length = 50)
+MESP.Lasso.refit = numeric(50)
+```
+
+```{r}
+# Choose the Lambda sequence based on the 10th training split.
+sample.cv.out1.L = cv.glmnet(X[-sample.test.id, ], Y[-sample.test.id], alpha = 1)
+plot(sample.cv.out1.L)
+# The default lambda sequence seems to be appropriate, then we use the default lambda sequence. 
+```
+
+
+```{r}
+for (k in 1:iter){
+  test.id[[k]] = all.test.id[,k]
+  cv.out.lasso[[k]] = cv.glmnet(X[-test.id[[k]], ], Y[-test.id[[k]]], alpha = 1)
+  best.lam.lasso[k] = cv.out.lasso[[k]]$lambda.min
+  best.lam.lasso.1se[k] = cv.out.lasso[[k]]$lambda.1se
+  
+  Ylasso.pred.min[[k]] = predict(cv.out.lasso[[k]], s = best.lam.lasso[k], newx = X[test.id[[k]], ])
+  MESP.Lasso.min[k]= mean((Y[test.id[[k]]] - Ylasso.pred.min[[k]])^2)
+  Ylasso.pred.1se[[k]] = predict(cv.out.lasso[[k]], s = best.lam.lasso.1se[k], newx = X[test.id[[k]], ])
+  MESP.Lasso.1se[k]= mean((Y[test.id[[k]]] - Ylasso.pred.1se[[k]])^2)
+  
+  mylasso.coef[[k]] = predict(cv.out.lasso[[k]], s = best.lam.lasso.1se[k], type = "coefficients")
+  var.sel[[k]] = row.names(mylasso.coef[[k]])[which(mylasso.coef[[k]] != 0)[-1]]
+  mylasso.refit[[k]] = lm(Y ~ ., data = Boston2[-test.id[[k]], c("Y", var.sel[[k]])])
+  Yrefit.pred[[k]] = predict(mylasso.refit[[k]], newdata = Boston2[test.id[[k]], ])
+  MESP.Lasso.refit[k]= mean((Y[test.id[[k]]] - Yrefit.pred[[k]])^2)
+}
+```
+
+- PCR
+
+```{r}
+cv.out = vector(mode = "list", length = 50)
+best.pcr = numeric(50)
+Ypcr.pred = vector(mode = "list", length = 50)
+MESP.pcr = numeric(50)
+
+for (i in 1:iter) {
+  mypcr = pcr(Y~., data=Boston2[-all.test.id[, i],], validation='CV')
+  CVerr = RMSEP(mypcr)$val[1,,]
+  best.pcr[i] = which.min(CVerr) - 1
+  
+  Ypcr.pred[[i]] = predict(mypcr, Boston2[all.test.id[,i],], ncomp=best.pcr[i])
+  
+  MESP.pcr[i] = mean((Ypcr.pred[[i]] - Y[all.test.id[,i]])^2)
+  
+}
+```
+
+- graph
+
+```{r}
+boxplot(MESP_Linear, MESP.Ridge.min, MESP.Ridge.1se,
+        MESP.Lasso.min, MESP.Lasso.1se,MESP.Lasso.refit,
+        MESP.pcr, names=c("Linear", "R.min", "R.1se", "L.min", "L.1se","L.refit", "PCR"),
+        col = c(1,2,3,4,5,6,7))
+```
+
+## Part III
+
+```{r read data}
+Boston3 = read.csv("D:/Statistics/STAT542/Coding2/BostonData3.csv")
+```
+
+```{r}
+Boston3 = Boston3[, -1]
+dim(Boston3)
+X = data.matrix(Boston3[,-1])  
+Y = Boston3[,1] 
+```
+``` {r}
+for(t in 1:iter){
+  all.test.id[, t] = sample(1:n, ntest)
+}
+```
+
+- Ridge
+
+```{r ridge}
+cv.out = vector(mode = "list", length = 50)
+best.lam = numeric(50)
+best.lam.1se = numeric(50)
+Yridge.pred.min = vector(mode = "list", length = 50)
+Yridge.pred.1se = vector(mode = "list", length = 50)
+MESP.Ridge.min = numeric(50)
+MESP.Ridge.1se = numeric(50)
+
+# Choose the Lambda sequence based on the 10th training split.
+sample.test.id = all.test.id[,10]
+sample.cv.out1 = cv.glmnet(X[-sample.test.id, ], Y[-sample.test.id], alpha = 0)
+plot(sample.cv.out1)
+
+# The default lambda sequence seems not appropriate, since it did not seem to include the minimum lambda. Then set another lambda sequence.
+myridge.lambda.seq2 = exp(seq(-2, 2, length.out = 100))
+sample.cv.out2 = cv.glmnet(X[-sample.test.id, ], Y[-sample.test.id], alpha = 0, lambda = myridge.lambda.seq2)
+plot(sample.cv.out2)
+
+# Then myridge.lambda.seq2 seem to be good, use this lambda sequence for the 50 iterations.
+myridge.lambda.seq = exp(seq(-2, 2, length.out = 100))
+```
+
+```{r }
+test.id = vector(mode = "list", length = 50)
+for (k in 1:iter){
+  test.id[[k]] = all.test.id[,k]
+  cv.out[[k]] = cv.glmnet(X[-test.id[[k]], ], Y[-test.id[[k]]], alpha = 0, lambda = myridge.lambda.seq)
+  best.lam[k] = cv.out[[k]]$lambda.min
+  best.lam.1se[k] = cv.out[[k]]$lambda.1se
+  
+  Yridge.pred.min[[k]] = predict(cv.out[[k]], s = best.lam[k], newx = X[test.id[[k]], ])
+  MESP.Ridge.min[k]= mean((Y[test.id[[k]]] - Yridge.pred.min[[k]])^2)
+  
+  Yridge.pred.1se[[k]] = predict(cv.out[[k]], s = best.lam.1se[k], newx = X[test.id[[k]], ])
+  MESP.Ridge.1se[k]= mean((Y[test.id[[k]]] - Yridge.pred.1se[[k]])^2)
+}
+```
+
+```{r}
+# Lasso with Lambda.min and Lambda.lse
+cv.out.lasso = vector(mode = "list", length = 50)
+best.lam.lasso = numeric(50)
+best.lam.lasso.1se = numeric(50)
+Ylasso.pred.min = vector(mode = "list", length = 50)
+Ylasso.pred.1se = vector(mode = "list", length = 50)
+MESP.Lasso.min = numeric(50)
+MESP.Lasso.1se = numeric(50)
+mylasso.coef = vector(mode = "list", length = 50)
+var.sel = vector(mode = "list", length = 50)
+mylasso.refit = vector(mode = "list", length = 50)
+Yrefit.pred = vector(mode = "list", length = 50)
+MESP.Lasso.refit = numeric(50)
+```
+
+```{r}
+# Choose the Lambda sequence based on the 10th training split.
+sample.cv.out1.L = cv.glmnet(X[-sample.test.id, ], Y[-sample.test.id], alpha = 1)
+plot(sample.cv.out1.L)
+# The default lambda sequence seems to be appropriate, then we use the default lambda sequence. 
+```
+
+```{r}
+for (k in 1:iter){
+  test.id[[k]] = all.test.id[,k]
+  cv.out.lasso[[k]] = cv.glmnet(X[-test.id[[k]], ], Y[-test.id[[k]]], alpha = 1)
+  best.lam.lasso[k] = cv.out.lasso[[k]]$lambda.min
+  best.lam.lasso.1se[k] = cv.out.lasso[[k]]$lambda.1se
+  
+  Ylasso.pred.min[[k]] = predict(cv.out.lasso[[k]], s = best.lam.lasso[k], newx = X[test.id[[k]], ])
+  MESP.Lasso.min[k]= mean((Y[test.id[[k]]] - Ylasso.pred.min[[k]])^2)
+  Ylasso.pred.1se[[k]] = predict(cv.out.lasso[[k]], s = best.lam.lasso.1se[k], newx = X[test.id[[k]], ])
+  MESP.Lasso.1se[k]= mean((Y[test.id[[k]]] - Ylasso.pred.1se[[k]])^2)
+  
+  mylasso.coef[[k]] = predict(cv.out.lasso[[k]], s = best.lam.lasso.1se[k], type = "coefficients")
+  var.sel[[k]] = row.names(mylasso.coef[[k]])[which(mylasso.coef[[k]] != 0)[-1]]
+  mylasso.refit[[k]] = lm(Y ~ ., data = Boston3[-test.id[[k]], c("Y", var.sel[[k]])])
+  Yrefit.pred[[k]] = predict(mylasso.refit[[k]], newdata = Boston3[test.id[[k]], ])
+  MESP.Lasso.refit[k]= mean((Y[test.id[[k]]] - Yrefit.pred[[k]])^2)
+}
+```
+
+- PCR
+
+```{r}
+cv.out = vector(mode = "list", length = 50)
+best.pcr = numeric(50)
+Ypcr.pred = vector(mode = "list", length = 50)
+MESP.pcr = numeric(50)
+
+for (i in 1:iter) {
+  mypcr = pcr(Y~., data=Boston3[-all.test.id[, i],], validation='CV')
+  CVerr = RMSEP(mypcr)$val[1,,]
+  best.pcr[i] = which.min(CVerr) - 1
+  
+  Ypcr.pred[[i]] = predict(mypcr, Boston3[all.test.id[,i],], ncomp=best.pcr[i])
+  
+  MESP.pcr[i] = mean((Ypcr.pred[[i]] - Y[all.test.id[,i]])^2)
+  
+}
+```
+
+
+```{r}
+boxplot(MESP.Ridge.min, MESP.Ridge.1se,MESP.Lasso.min,
+        MESP.Lasso.1se,MESP.Lasso.refit, MESP.pcr,
+        names=c("R.min", "R.1se", "L.min", "L.1se", "L.refit", "PCR"),
+        col = c(1,2,3,4,5,6))
+```
+
+
+## Comment: 
+
+Data Boston2 is a dataset with 78 more predictors generated by the previous numeric predictors. And the data Boston3 is a dataset with 500 more noise predictors. 
+For Lasso in Boston2 and Boston3, large number of noise predictors in Boston3 will push lambda to be large, therefore the small signal will be killed and a larger bias will be introduced to the non-zero coefficients. Therefore, the performance of Lasso on Boston3 will be a little worse than that on Boston2. 
+For Ridge in Boston2 and Boston3, since Ridge regression will not enforce the beta coefficients to be zero, but shrink the LS estimator by the factor dj^2/(dj^2+lambda), the ridge regression will not get rid of the irrelevant features, but minimize the effects of them on the training dataset. Since Boston3 has a lot of noise predictors, Lasso tends to kick out the irrelevant features, while Ridge will only minimize their effects. Therefore, even though Lasso and Ridge perform quite similarly on Boston2, Lasso will perform much better than Ridge on Boston3.
+For PCR, the first principal component is constructed based on that maximize the variation of the observations. Therefore, within data Boston3, principal components are constructed only with information of the predictors that may include a very large number of noise which are not related to the response Y. Therefore, the principal components may not suffice that well to explain the variation of the response, contributing to a much worse performance in Boston3 that Boston2. 
+As for the comparison between Lambda.min and Lambda.1se, since Lambda.min should be the one that gives minimum CV error, the performance in test data may be better than other lambda as expected.
