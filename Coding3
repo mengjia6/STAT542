@@ -1,0 +1,181 @@
+---
+title: "Coding3"
+author: "Mengjia Zeng and Weian Yin"
+date: "2021/9/25"
+output: html_document
+---
+
+## Team Members
+
+1. Name: Weian Yin NetID: weiany2 (wrote code for Part II and check all the remaining codes.)
+2. Name Mengjia Zeng NetID: mengjia6 (wrote code for Part I and primarily wrote code for Part II question 1.)
+
+## Part I
+
+```{r}
+lo.lev <- function(x1, sp){
+  # x1: n-by-1 feature vector
+  # sp: a numerical value for "span"
+  
+  n = length(x1);
+  lev = matrix(0, n, n)
+  for (i in 1:n){
+    y = rep(0, n);
+    y[i] = 1;
+    yi = loess(y ~ x1, span = sp, control = loess.control(surface = "direct"))$fitted
+    lev[,i] = yi
+  }
+  lev = diag((lev+ t(lev))/2)
+  return(lev)
+}
+
+```
+
+```{r}
+onestep_CV <- function(x1, y1, sp){
+  
+  ##############################################
+  #  YOUR CODE: 
+  #  1) Fit a loess model y1 ~ x1 with span = sp, and extract 
+  #     the corresponding residual vector
+  #  2) Call lo.lev to obtain the diagonal entries of S
+  #  3) Compute LOO-CV and GCV using formula from lecture notes
+  #    [lec_W5_NonlinearRegression.pdf] page 33. 
+  ##############################################
+  n = length(x1)
+  fit = loess(y1~ x1, span = sp, control = loess.control(surface = "direct"))$residuals
+  diag = lo.lev(x1, sp)
+  num_cv = numeric(n)
+  num_gcv = numeric(n)
+  sum.diag = sum(diag)
+  for (i in 1:n){
+    num_cv[i] = (fit[i]/(1-diag[i]))^2
+    num_gcv[i] = (fit[i]/(1-sum.diag/n))^2
+  }
+  cv = sum(num_cv)/n
+  gcv = sum(num_gcv)/n
+  return(list(cv = cv, gcv = gcv))
+}
+
+myCV <- function(x1, y1, span){
+  # x1: feature vector of length n
+  # y1: response vector of length n
+  # span: a sequence of values for "span"
+  
+  m = length(span)
+  cv = rep(0, m)
+  gcv = rep(0, m)
+  
+  for(i in 1:m){
+    tmp = onestep_CV(x1, y1, span[i])
+    cv[i] = tmp$cv
+    gcv[i] = tmp$gcv
+  }
+  return(list(cv = cv, gcv = gcv))
+}
+```
+
+```{r}
+mydata = read.csv("D:/Statistics/STAT542/Coding3_Data.csv")
+plot(mydata$x, mydata$y, xlab="", ylab="")
+span1 = seq(from = 0.2, by = 0.05, length = 15 )
+cv.out = myCV(mydata$x, mydata$y, span1)
+```
+
+```{r}
+myout = data.frame(CV = cv.out$cv, 
+                   GCV = cv.out$gcv, 
+                   span = span1)
+myout
+myout$span[myout$GCV == min(myout$GCV)]
+myout$span[myout$CV == min(myout$CV)]
+# Both of them achieved optimal with span to be 0.5.
+```
+
+```{r}
+span.cv = 0.5
+plot(mydata$x, mydata$y, xlab="", ylab="", col="gray");
+fx = 1:50/50;
+fy = sin(12*(fx+0.2))/(fx+0.2)
+lines(fx, fy, col=8, lwd=2)
+f = loess(y ~ x, mydata, span = span.cv)
+lines(fx, predict(f, data.frame(x = fx), surface = "direct"), lty=2, lwd=2, col="blue")
+```
+
+## Part II
+
+```{r}
+set.seed(6199)
+mydata = read.csv("D:/Statistics/STAT542/Sales_Transactions_Dataset_Weekly.csv")
+```
+
+1. Fit with NCS
+
+```{r}
+# center features
+X = as.matrix(mydata[, 2:53])
+row.names(X) = mydata[,1]
+X = X - rowMeans(X)
+```
+
+```{r}
+library(splines)
+index = seq(0, 1, length.out = ncol(X))
+index
+```
+
+```{r}
+library(ggplot2)
+F_matrix = ns(index, df = 9)
+dim(F_matrix)
+mydf = 9
+n = length(index)
+tmpdata = data.frame(t = rep(1:n, mydf),
+                     basisfunc=as.vector(F_matrix), 
+                     type=as.factor(rep(1:mydf, each=n)))
+ggplot(tmpdata, aes(x=t, y=basisfunc, color=type)) +
+  geom_path()
+F_matrix = t(t(F_matrix) - colMeans(F_matrix))
+```
+
+
+
+```{r}
+B = solve(t(F_matrix) %*% F_matrix) %*%t(F_matrix) %*% t(X)
+B = t(B)
+```
+
+2. k-means on B
+
+```{r}
+myK = 6
+mykm1 = kmeans(B, centers=6)
+mycenters1 = mykm1$centers %*% t(F_matrix)
+par(mfrow=c(2,3))
+for(k in 1:myK){
+  id=which(mykm1$cluster==k)
+  print(k)
+  plot(NA, xlim = c(1, ncol(X)), ylim = range(X), 
+       xlab = "Weeks", ylab = "Weekly Sales")
+  for(i in 1:length(id))
+    lines(1:ncol(X), X[id[i],] , col="gray")
+  lines(1:ncol(X), mycenters1[k,], col="red")
+}
+```
+
+3. k-means with X
+
+``` {r}
+mykm2 = kmeans(X, centers=6)
+mycenters2 = mykm2$centers
+
+par(mfrow=c(2,3))
+for(k in 1:myK){
+  id=which(mykm2$cluster==k)
+  plot(NA, xlim = c(1, ncol(X)), ylim = range(X), 
+       xlab = "Weeks", ylab = "Weekly Sales")
+  for(i in 1:length(id))
+    lines(1:ncol(X), X[id[i],] , col="gray")
+  lines(1:ncol(X), mycenters2[k,], col="red")
+}
+```
